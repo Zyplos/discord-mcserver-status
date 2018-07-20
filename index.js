@@ -1,6 +1,6 @@
 const Discord = require("discord.js");
 const client = new Discord.Client();
-const request = require("snekfetch");
+const https = require("https");
 /*
     Set this to your Bot's token.
 */
@@ -17,9 +17,15 @@ var cachedTimestamp;
 var errorTries = 0;
 
 function pingServer() {
-    request.get("https://api.mcsrvstat.us/1/" + ip)
-        .then(requestData => {
-            data = requestData.body;
+    https.get("https://api.mcsrvstat.us/1/" + ip, function (res) {
+        var body = "";
+
+        res.on("data", function (chunk) {
+            body += chunk;
+        });
+
+        res.on("end", function () {
+            data = JSON.parse(body);
             cachedTimestamp = new Date();
             errorTries = 0;
 
@@ -33,7 +39,10 @@ function pingServer() {
                 statusType = "PLAYING";
             } else {
                 statusType = "WATCHING";
-                if (data.players.online == 0) {
+                if(data.players.online == null) {
+                    status = "dnd";
+                    textStatus = "Server loading...";
+                } else if (data.players.online == 0) {
                     status = "idle";
                     textStatus = "0 players of " + data.players.max + " | Online";
                 } else {
@@ -51,22 +60,25 @@ function pingServer() {
             }).then(() => {
                 console.log("[" + cachedTimestamp.toLocaleTimeString() + "] Updated: " + textStatus);
             });
-
-        }).catch(errorData => {
-            console.log("[discord-mcserver-status] An error occurred while trying to get the server's status.");
-            console.log(errorData);
-            errorTries++;
-            if (errorTries > 10) {
-                console.log("[discord-mcserver-status] Too many errors have occurred, shutting down. Please look at the index.js file and make sure the IP is right, or that any edited code is correct.");
-            }
         });
+    }).on("error", function (errorData) {
+        console.log("[discord-mcserver-status] An error occurred while trying to get the server's status.");
+        console.log(errorData);
+        errorTries++;
+        if (errorTries > 10) {
+            console.log("[discord-mcserver-status] Too many errors have occurred, shutting down. Please look at the index.js file and make sure the IP is right, or that any edited code is correct.");
+        }
+    });
 }
 
 client.on("ready", () => {
     console.log("[discord-mcserver-status] Loaded!");
 
-    if (!ip || !command) {
+    if (!botToken | !ip || !command) {
         console.log("[discord-mcserver-status] Hey, you're missing some stuff.");
+        if (!botToken) {
+            console.log("[discord-mcserver-status] You forgot to enter the bot's token.");
+        }
         if (!ip) {
             console.log("[discord-mcserver-status] You forgot to set the IP.");
         }
@@ -79,19 +91,28 @@ client.on("ready", () => {
     console.log("[discord-mcserver-status] Pinging server...");
 
     pingServer();
+    /*
+        Updates every 30 seconds. Setting it any lower may block the
+        bot from being able to retrieve server data.
+    */
     client.setInterval(pingServer, 30000);
 });
 
 client.on("message", msg => {
     if (msg.content === command) {
 
-        if(!data){
+        if (!data) {
             msg.channel.send("Currently pinging the server, try again in a bit.");
             return;
         }
 
         if ("offline" in data) {
             msg.channel.send("The server is currently offline.");
+            return;
+        }
+
+        if (data.players.online == null) {
+            msg.channel.send("The server is still loading up.");
             return;
         }
 
@@ -103,7 +124,6 @@ client.on("message", msg => {
                 "footer": {
                     "text": ip + " • Last updated"
                 },
-                //"timestamp": new Date(globalResponse.data.last_updated * 1000),
                 "timestamp": cachedTimestamp
             }
         };
@@ -111,7 +131,7 @@ client.on("message", msg => {
         if (data.players.online > 0) {
             var playerList = "";
 
-            for(var i = 0; i < data.players.list.length; i++){
+            for (var i = 0; i < data.players.list.length; i++) {
                 playerList += (data.players.list[i] + "\n");
             }
 
